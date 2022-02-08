@@ -1,6 +1,6 @@
 Package: IxPopDyMod
 Title: Framework for Tick Population and Infection Modeling
-Version: 0.1.0
+Version: 0.2.0
 Authors@R: 
     c(person(given = "Myles",
            family = "Stokowski",
@@ -28,8 +28,8 @@ Imports: magrittr, rlang, ggplot2, stringr, dplyr, tidyr, igraph,
         readr, yaml, tibble
 Language: en-US
 NeedsCompilation: no
-Packaged: 2021-11-07 02:37:02 UTC; myles
+Packaged: 2022-02-07 17:50:43 UTC; myles
 Author: Myles Stokowski [aut, cre],
   David Allen [aut] (<https://orcid.org/0000-0002-0712-9603>)
 Repository: CRAN
-Date/Publication: 2021-11-08 15:30:11 UTC
+Date/Publication: 2022-02-08 07:30:05 UTC
