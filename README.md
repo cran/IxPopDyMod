@@ -1,5 +1,13 @@
 
 <!-- README.md is generated from README.Rmd. Please edit that file -->
+<!-- badges: start -->
+
+[![R-CMD-check](https://github.com/dallenmidd/IxPopDyMod/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/dallenmidd/IxPopDyMod/actions/workflows/R-CMD-check.yaml)
+[![CRAN
+version](http://www.r-pkg.org/badges/version/IxPopDyMod)](https://cran.r-project.org/package=IxPopDyMod)
+[![Codecov test
+coverage](https://codecov.io/gh/dallenmidd/IxPopDyMod/branch/master/graph/badge.svg)](https://app.codecov.io/gh/dallenmidd/IxPopDyMod?branch=master)
+<!-- badges: end -->
 
 # IxPopDyMod: A framework for Ixodidae Population Dynamics Models
 
@@ -38,24 +46,49 @@ wish to create a custom model configuration, see `?config()`.
 ## Simple example
 
 We start with `config_ex_1`, a simple model configuration that doesn’t
-consider infection, and that has four life stages: `__e` for egg, `__l`
-for larvae, `__n` for nymph, and `__a` for adult.
+consider infection, and that has four life stages: `egg`, `larva`,
+`nymph`, and `adult`. This `config` is already loaded with the package,
+but as an example here is how the `config` is specified in R.
 
 ``` r
-library(IxPopDyMod)
-library(readr)
-library(ggplot2)
-library(dplyr, warn.conflicts = FALSE)
+# library(IxPopDyMod)
+devtools::load_all()
+config_ex_1 <- config(
+  cycle = life_cycle(
+    transition("egg", "larva", function(a) a, transition_type = "probability", parameters = c(a = 1)),
+    transition("egg", NULL, function(a) a, transition_type = "probability", mortality_type = "per_day", parameters = c(a = 0)),
+    transition("larva", "nymph", function(a) a, transition_type = "probability", parameters = c(a = 0.01)),
+    transition("larva", NULL, function(a) a, transition_type = "probability", mortality_type = "per_day", parameters = c(a = 0.99)),
+    transition("nymph", "adult", function(a) a, transition_type = "probability", parameters = c(a = 0.1)),
+    transition("nymph", NULL, function(a) a, transition_type = "probability", mortality_type = "per_day", parameters = c(a = 0.9)),
+    transition("adult", "egg", function(a) a, transition_type = "probability", parameters = c(a = 1000)),
+    transition("adult", NULL, function(a) a, transition_type = "probability", mortality_type = "per_day", parameters = c(a = 0))
+  ),
+  initial_population = c("adult" = 1000),
+  steps = 29L
+)
 ```
-# 
+
+Here each transition is a `probability` rather than `duration` (see
+below) and there are not predictors (like temperature or the host
+community). All eggs hatch to larvae, 1% of larvae make it to nymphs,
+10% of nymphs become adults, and than each adult lays 1000 eggs. The
+model starts with 1000 adults and runs for 29 time steps.
+
 ### Vary a parameter in the model
 
 We give a new range of parameter values for number of eggs laid.
 
 ``` r
-eggs_laid <- c(800, 1000, 1200)
-modified_configs <- vary_param(config_ex_1, from = '__a', to = '__e', 
-                               param_name = 'a', values = eggs_laid)
+cfg1 <- config_ex_1
+cfg2 <- config_ex_1
+cfg3 <- config_ex_1
+
+cfg1$cycle[[7]]$parameters[['a']] <- 800
+cfg2$cycle[[7]]$parameters[['a']] <- 1000
+cfg3$cycle[[7]]$parameters[['a']] <- 1200
+
+modified_configs <- list(cfg1, cfg2, cfg3)
 ```
 
 This gives us a list of three modified model `config`s, which differ
@@ -64,35 +97,16 @@ only in the number of eggs laid.
 ### Run the model with each new parameter value
 
 ``` r
-outputs <- run_all_configs(modified_configs)
-outputs[[1]]
-#> # A tibble: 116 × 6
-#>      day stage    pop age_group process infected
-#>    <int> <chr>  <dbl> <chr>     <chr>   <lgl>   
-#>  1     1 __e        0 e         _       FALSE   
-#>  2     1 __l        0 l         _       FALSE   
-#>  3     1 __n        0 n         _       FALSE   
-#>  4     1 __a     1000 a         _       FALSE   
-#>  5     2 __e   800000 e         _       FALSE   
-#>  6     2 __l        0 l         _       FALSE   
-#>  7     2 __n        0 n         _       FALSE   
-#>  8     2 __a        0 a         _       FALSE   
-#>  9     3 __e        0 e         _       FALSE   
-#> 10     3 __l   800000 l         _       FALSE   
-#> # … with 106 more rows
+outputs <- lapply(modified_configs, run)
 ```
 
 The model output is a data frame where the column `day` indicates Julian
 date, `stage` indicates tick life stage, and `pop` is population size.
-The remaining columns breakdown the `stage` column into it’s constituent
-parts: the `age` and current `process` of a tick, and whether it is
-`infected`. Since we ran the model with multiple configurations, we get
-a list of data frames. Here we inspect only the first.
 
 ### Calculate growth rate for each of the model outputs
 
 ``` r
-sapply(outputs, growth_rate) 
+sapply(outputs, growth_rate)
 #> [1] 0.9457416 1.0000000 1.0466351
 ```
 
@@ -101,63 +115,48 @@ output. The population is stable with 1000 eggs laid, as indicated by
 the growth rate `1`. The population decreases with 800 eggs laid, and
 increases with 1200 eggs laid.
 
-### Graph outputs
-
-To see a breakdown of how the population is changing, we graph the
-population over time of each age group, for each model output. As
-expected, for each output there is a cycle with a peak in number of
-eggs, followed by peaks in larvae, nymph and then adult population.
-
-``` r
-names(outputs) <- c('0800 eggs laid', '1000 eggs laid', '1200 eggs laid')
-outputs_stacked <- bind_rows(outputs, .id = "id")
-outputs_stacked %>%
-  graph_population_each_group() +
-  facet_wrap(~ id)
-```
-
-<img src="man/figures/README-unnamed-chunk-6-1.png" width="100%" />
-
 ## Temperature-dependent transitions
 
 ``` r
-temp_example_config$transitions
-#> # A tibble: 16 × 7
-#>    from  to    transition_fun delay source            pred1 pred2
-#>    <chr> <chr> <chr>          <lgl> <chr>             <chr> <lgl>
-#>  1 __e   q_l   expo_fun       TRUE  Ogden et al. 2004 temp  NA   
-#>  2 __e   m     constant_fun   TRUE  Ogden et al. 2005 <NA>  NA   
-#>  3 q_l   m     constant_fun   FALSE Ogden et al. 2005 <NA>  NA   
-#>  4 q_n   m     constant_fun   FALSE Ogden et al. 2005 <NA>  NA   
-#>  5 q_a   m     constant_fun   FALSE Ogden et al. 2005 <NA>  NA   
-#>  6 e_l   m     constant_fun   TRUE  Ogden et al. 2005 <NA>  NA   
-#>  7 e_n   m     constant_fun   TRUE  Ogden et al. 2005 <NA>  NA   
-#>  8 e_a   m     constant_fun   TRUE  Ogden et al. 2005 <NA>  NA   
-#>  9 r_a   m     constant_fun   FALSE Ogden et al. 2005 <NA>  NA   
-#> 10 q_l   e_l   constant_fun   FALSE <NA>              <NA>  NA   
-#> 11 e_l   q_n   expo_fun       TRUE  <NA>              temp  NA   
-#> 12 q_n   e_n   constant_fun   FALSE <NA>              <NA>  NA   
-#> 13 e_n   q_a   expo_fun       TRUE  <NA>              temp  NA   
-#> 14 q_a   e_a   constant_fun   FALSE <NA>              <NA>  NA   
-#> 15 e_a   r_a   expo_fun       TRUE  <NA>              temp  NA   
-#> 16 r_a   __e   constant_fun   FALSE <NA>              <NA>  NA
+temp_example_config$cycle
+#> ** A life cycle
+#> ** Number of transitions: 15
+#> ** Unique life stages: __e, q_l, e_l, q_n, e_n, q_a, e_a, r_a
+#> 1. __e -> q_l 
+#> 2. __e -> mortality 
+#> 3. q_l -> e_l 
+#> 4. q_l -> mortality 
+#> 5. e_l -> q_n 
+#> 6. e_l -> mortality 
+#> 7. q_n -> e_n 
+#> 8. q_n -> mortality 
+#> 9. e_n -> q_a 
+#> 10. e_n -> mortality 
+#> ... and 5 more transitions
 ```
 
-From the first line of this tick life-stage transitions table, you see
-that the development from eggs, `__e`, to questing larvae, `q_l`, is an
-exponential function of temperature. We can see the parameters for this
-transition:
+Calling the `life_cycle` element in a `config` gives a summary of the
+life cycle. Here we see the life stages, how many transitions between
+life stages there are, and the first 10 transitions are shown. Each
+transition is stored in the `life_cycle` as a list, so they can be
+called using list indexing.
 
 ``` r
-temp_example_config$parameters %>% filter(from == '__e', to == 'q_l')
-#> # A tibble: 2 × 8
-#>   from  to    param_name host_spp param_value param_ci_low param_ci_high source 
-#>   <chr> <chr> <chr>      <lgl>          <dbl> <lgl>        <lgl>         <chr>  
-#> 1 __e   q_l   a          NA         0.0000292 NA           NA            Ogden …
-#> 2 __e   q_l   b          NA         2.27      NA           NA            Ogden …
+temp_example_config$cycle[[1]]
+#> ** A transition
+#> ** __e -> q_l 
+#> Transition type: duration
+#> Predictors: x = list(pred = "temp", first_day_only = FALSE)
+#> Parameters: a = 2.92e-05, b = 2.27
+#> Function: (x, a, b) ifelse(x > 0, a * x^b, 0)
 ```
 
-The daily development rate is `0.0000292*temp^2.27`.
+Here is the first transition from `__e`, eggs, to `q_l`, questing
+larvae. This transition is a duration, so we interpret the output as the
+rate at which it happens on the probability with which it happens. It
+has a predictor, temperature. So the time to transition from egg to
+questing larva is a temperature dependent function. The parameters and
+function show this rate is `2.92e-05 * temp^2.27`.
 
 ### Compare two temperature scenarios
 
@@ -166,30 +165,32 @@ the model. We make a second `config` in which the daily temperature is
 one degree warmer.
 
 ``` r
-cfg2 <- temp_example_config
-cfg2$weather <- temp_example_config$predictors %>% mutate(value = value + 1)
+output <- run(temp_example_config)
 
-output1 <- run(temp_example_config)
-output2 <- run(cfg2)
+# Predictor data for this example config is the temperature data from the Ogden config
+# (host density data is dropped).
+temp_pred2 <- readr::read_csv("./data-raw/ogden2005/predictors.csv") %>% dplyr::filter(pred == "temp")
 
-output1 <- output1 %>% mutate(temp = 'cold')
-output2 <- output2 %>% mutate(temp = 'warm')
+temp_pred2$value <- temp_pred2$value + 1
+
+temp_example_config2 <- temp_example_config
+temp_example_config2$preds <- temp_pred2
+
+output2 <- run(temp_example_config2)
 ```
 
 Finally, we compare the outputs for a commonly measured aspect of tick
 populations, the number of questing nymphs.
 
 ``` r
-output1 %>%
-  rbind(output2) %>% 
-  filter(stage == 'q_n') %>%
-  ggplot(aes(day, pop, col = temp)) +
-  geom_line() +
-  scale_color_manual(values = c('cold' = 'blue', 'warm' = 'red')) +
-  ylab('Questing nymphs')
+output_qn <- subset(output, stage == 'q_n')
+output2_qn <- subset(output2, stage == 'q_n')
+
+plot(output2_qn$day, output2_qn$pop, type = 'l', col = 'red', lwd = 2, xlab = 'Day', ylab='Questing nymphs')
+lines(output_qn$day, output_qn$pop, type = 'l', col = 'blue', lwd = 2)
 ```
 
-<img src="man/figures/README-unnamed-chunk-10-1.png" width="100%" />
+<img src="man/figures/README-unnamed-chunk-9-1.png" width="75%" />
 
 Here you can see nymphs start questing earlier and reach a higher
 population in the warmer climate.
@@ -199,53 +200,26 @@ population in the warmer climate.
 In the previous example there was no host community explicitly stated
 and ticks had a constant probability of transition between life stages
 (e.g., from larva to nymph). It is possible to instead model these
-probabilities based on host community composition.
+probabilities based on host community composition. Here transition from
+questing larvae, `q_l`, to engorged larvae, `e_l`, depends on the
+`host_den`, which is how the host community is included in the
+transition.
 
 ``` r
-host_example_config$transitions
-#> # A tibble: 16 × 7
-#>    from  to    transition_fun delay source            pred1    pred2
-#>    <chr> <chr> <chr>          <lgl> <chr>             <chr>    <lgl>
-#>  1 __e   q_l   expo_fun       TRUE  Ogden et al. 2004 temp     NA   
-#>  2 __e   m     constant_fun   TRUE  Ogden et al. 2005 <NA>     NA   
-#>  3 q_l   m     constant_fun   FALSE Ogden et al. 2005 <NA>     NA   
-#>  4 q_n   m     constant_fun   FALSE Ogden et al. 2005 <NA>     NA   
-#>  5 q_a   m     constant_fun   FALSE Ogden et al. 2005 <NA>     NA   
-#>  6 e_l   m     constant_fun   TRUE  Ogden et al. 2005 <NA>     NA   
-#>  7 e_n   m     constant_fun   TRUE  Ogden et al. 2005 <NA>     NA   
-#>  8 e_a   m     constant_fun   TRUE  Ogden et al. 2005 <NA>     NA   
-#>  9 r_a   m     constant_fun   FALSE Ogden et al. 2005 <NA>     NA   
-#> 10 q_l   e_l   find_n_feed    FALSE <NA>              host_den NA   
-#> 11 e_l   q_n   expo_fun       TRUE  <NA>              temp     NA   
-#> 12 q_n   e_n   find_n_feed    FALSE <NA>              host_den NA   
-#> 13 e_n   q_a   expo_fun       TRUE  <NA>              temp     NA   
-#> 14 q_a   e_a   find_n_feed    FALSE <NA>              host_den NA   
-#> 15 e_a   r_a   expo_fun       TRUE  <NA>              temp     NA   
-#> 16 r_a   __e   constant_fun   FALSE <NA>              <NA>     NA
+host_example_config$cycle[[3]]
+#> ** A transition
+#> ** q_l -> e_l 
+#> Transition type: probability
+#> Predictors: x = list(pred = "host_den", first_day_only = TRUE)
+#> Parameters: a = 0.01, pref = c(deer = 0.25, mouse = 1, squirrel = 0.25), feed_success = c(deer = 0.49, mouse = 0.49, squirrel = 0.17)
+#> Function: (x, a, pref, feed_success) {    if (length(pref)%%length(x) != 0) {        print(paste("error in find_n_feed, x:", length(x), "pref:",             length(pref)))    }    (1 - (1 - a)^(sum(x * pref)/sum(pref))) * sum(x * pref *         feed_success/sum(x * pref))}
 ```
 
-Here transition from questing larvae, `q_l`, to engorged larvae, `e_l`,
-depends on the `host_den`, which is how the host community is included
-in the transition.
-
-``` r
-host_example_config$parameters %>% filter(from == 'q.l', to == 'e.l')
-#> # A tibble: 6 × 8
-#>   from  to    param_name  host_spp param_value param_ci_low param_ci_high source
-#>   <chr> <chr> <chr>       <chr>          <dbl> <lgl>        <lgl>         <chr> 
-#> 1 q.l   e.l   pref        deer            0.25 NA           NA            <NA>  
-#> 2 q.l   e.l   feed_succe… deer            0.49 NA           NA            Levi …
-#> 3 q.l   e.l   pref        mouse           1    NA           NA            <NA>  
-#> 4 q.l   e.l   feed_succe… mouse           0.49 NA           NA            Levi …
-#> 5 q.l   e.l   pref        squirrel        0.25 NA           NA            <NA>  
-#> 6 q.l   e.l   feed_succe… squirrel        0.17 NA           NA            Levi …
-```
-
-Here the parameters of `find_n_feed` get different values for each host
-species. In this case the two parameters are `pref`, which is the larval
-tick’s preference for the three different host species, and
-`feed_success`, which is the fraction of feeding larvae which
-successfully feed to completion.
+This transition from questing larvae to engorged larvae depends on
+`host_den`, host densities. Here some parameters in the transition
+function have different values for each host species. Here `pref` is
+larval preference for different host species and `feed_success` is the
+probability an attached larva feeds to completion on each host species.
 
 In this example the temperature and host community are constant through
 time, but the package also supports variable temperature and host
@@ -258,68 +232,61 @@ We now compare how different host densities affect tick populations.
 Here we vary the deer density.
 
 ``` r
-cfg_lowdeerden <- host_example_config
-cfg_highdeerden <- host_example_config
-cfg_lowdeerden$predictors <- host_example_config$predictors %>% 
-  mutate(value = ifelse(pred == 'host_den' & pred_subcategory == 'deer', 0.1, value))
-cfg_highdeerden$predictors <- host_example_config$predictors %>% 
-  mutate(value = ifelse(pred == 'host_den' & pred_subcategory == 'deer', 5, value))
+cfg_lowdeer <- host_example_config
+cfg_highdeer <- host_example_config
+
+cfg_lowdeer$preds$value[cfg_lowdeer$preds$pred_subcategory == 'deer'] <- 0.1
+cfg_highdeer$preds$value[cfg_highdeer$preds$pred_subcategory == 'deer'] <- 5
+
+output_lowdeer <- run(cfg_lowdeer)
+output_middeer <- run(host_example_config)
+output_highdeer <- run(cfg_highdeer)
+
+output_lowdeer_qn <- subset(output_lowdeer, stage == 'q_n')
+output_middeer_qn <- subset(output_middeer, stage == 'q_n')
+output_highdeer_qn <- subset(output_highdeer, stage == 'q_n')
 
 
-output_middeerden <- run(host_example_config)
-output_lowdeerden <- run(cfg_lowdeerden)
-output_highdeerden <- run(cfg_highdeerden)
-
-output_middeerden <- output_middeerden %>% mutate(deer_den = 'mid')
-output_lowdeerden <- output_lowdeerden %>% mutate(deer_den = 'low')
-output_highdeerden <- output_highdeerden %>% mutate(deer_den = 'high')
+plot(output_highdeer_qn$day, log10(output_highdeer_qn$pop), type = 'l', lwd = 2, col = '#1b9e77', yaxt = 'n', ylab ='Questing nymphs', xlab = 'Day', ylim = c(2,5))
+lines(output_middeer_qn$day, log10(output_middeer_qn$pop), col = '#d95f02', lwd = 2)
+lines(output_lowdeer_qn$day, log10(output_lowdeer_qn$pop), col = '#7570b3', lwd = 2)
+text(x = 25, y = c(4.25,4,3.75), labels = c('High deer den.', 'Mid deer den.', 'Low deer den.'), col = c('#1b9e77', '#d95f02', '#7570b3'))
+axis(side = 2, at = 2:5, labels = c(expression(10^2),expression(10^3),expression(10^4),expression(10^5)))
 ```
 
-And then use the `graph_population_each_group()` function to see how the
-deer densities affect the tick population.
+<img src="man/figures/README-unnamed-chunk-11-1.png" width="75%" />
 
-``` r
-output_lowdeerden %>%
-  bind_rows(output_middeerden, output_highdeerden) %>%
-  mutate(deer_den = factor(deer_den, levels = c('low', 'mid', 'high'))) %>%
-  graph_population_each_group() +
-  facet_wrap(~deer_den)
-```
+## Tick-borne pathogen infection dynamics
 
-<img src="man/figures/README-unnamed-chunk-14-1.png" width="100%" />
-
-## Tick-borne disease infection dynamics
-
-In the examples above we modeled a tick population without a tick borne
-disease. Here we give an example of how the package can be used to also
+In the examples above we modeled a tick population without a tick-borne
+pathogen Here we give an example of how the package can be used to also
 include infection dynamics.
 
 So far all examples have used transition functions loaded into the
 package, here we show how to define our own.
 
 ``` r
-find_host <- function(x, y, a, pref)
-{
-  1-(1-a)^sum(x*pref)
+find_host <- function(x, y, a, pref) {
+  1 - (1 - a)^sum(x * pref)
 }
 ```
 
 ``` r
-infect_example_config$transitions
-#> # A tibble: 33 × 6
-#>    from  to    transition_fun delay pred1    pred2
-#>    <chr> <chr> <chr>          <lgl> <chr>    <lgl>
-#>  1 __e   q_l   constant_fun   TRUE  <NA>     NA   
-#>  2 __e   m     constant_fun   TRUE  <NA>     NA   
-#>  3 q_l   f_l   find_host      FALSE host_den NA   
-#>  4 q_l   m     constant_fun   FALSE <NA>     NA   
-#>  5 f_l   eil   infect_fun     FALSE host_den NA   
-#>  6 f_l   eul   infect_fun     FALSE host_den NA   
-#>  7 eil   qin   constant_fun   TRUE  <NA>     NA   
-#>  8 eil   m     constant_fun   TRUE  <NA>     NA   
-#>  9 eul   qun   constant_fun   TRUE  <NA>     NA   
-#> 10 eul   m     constant_fun   TRUE  <NA>     NA   
-#> # … with 23 more rows
+infect_example_config$cycle
+#> ** A life cycle
+#> ** Number of transitions: 33
+#> ** Unique life stages: __e, q_l, f_l, eil, eul, qin, qun, fun, fin, ein, eun, qia, qua, fua, fia, eia, eua, r_a
+#> 1. __e -> q_l 
+#> 2. __e -> mortality 
+#> 3. q_l -> f_l 
+#> 4. q_l -> mortality 
+#> 5. f_l -> eil 
+#> 6. f_l -> eul 
+#> 7. eil -> qin 
+#> 8. eil -> mortality 
+#> 9. eul -> qun 
+#> 10. eul -> mortality 
+#> ... and 23 more transitions
 ```
 
 Here we use the middle character of the life-stage key. It is either `i`
@@ -342,43 +309,32 @@ model to illustrate this possibility.
 
 ``` r
 deer_den <- c(0.1, 0.25, 0.5, 0.75, 1)
-results_tib <- tibble(deer = deer_den, nymph_den = 0, nip = 0)
+results_df <- data.frame(deer = deer_den, nymph_den = 0, nip = 0)
 
 for (i in 1:5)
 {
   cfg_mod <- infect_example_config
-  cfg_mod$predictors[1,4] <- deer_den[i]
+  cfg_mod$preds[1, 4] <- deer_den[i]
   out <- run(cfg_mod)
-  
-  nymph_sum <- out %>%
-  filter(stage == 'qin' | stage == 'qun') %>%
-  group_by(stage) %>%
-  summarise(totpop = sum(pop)) 
 
-  results_tib$nip[i] <- unlist(nymph_sum[1,2] /(nymph_sum[1,2] + nymph_sum[2,2]))
-  results_tib$nymph_den[i] <- out %>%
-    filter(stage == 'qin' | stage == 'qun') %>%
-    summarise(totpop = sum(pop)) %>%
-    unlist()
+
+
+  results_df$nip[i] <- sum(out[out$stage=='qin','pop'])/(sum(out[out$stage=='qin','pop']) + sum(out[out$stage=='qun','pop']))
+
+  results_df$nymph_den[i] <- sum(out[out$stage=='qin','pop']) + sum(out[out$stage=='qun','pop'])
 }
+
+plot(results_df$deer,results_df$nymph_den, xlab = 'Deer density', ylab = 'Number of questing nymphs')
 ```
+
+<img src="man/figures/README-unnamed-chunk-14-1.png" width="75%" />
 
 ``` r
-results_tib %>%
-  ggplot(aes(deer, nip)) +
-  geom_point()
+
+plot(results_df$deer,results_df$nip, xlab = 'Deer density', ylab = 'Nymph infection rate')
 ```
 
-<img src="man/figures/README-unnamed-chunk-18-1.png" width="100%" />
-
-``` r
-results_tib %>%
-  ggplot(aes(deer, nymph_den)) +
-  geom_point()
-```
-
-<img src="man/figures/README-unnamed-chunk-18-2.png" width="100%" />
+<img src="man/figures/README-unnamed-chunk-14-2.png" width="75%" />
 
 Here we see that as deer density increases the number of nymphs
-increases (as the tick population gets bigger). But the nymph infection
-prevalence (NIP) goes down.
+increases, but the nymph infection prevalence (NIP) goes down.
